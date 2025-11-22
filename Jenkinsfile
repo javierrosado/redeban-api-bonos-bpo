@@ -26,7 +26,7 @@ pipeline {
     stages {
 
         /* ===========================================================
-                          CHECKOUT DEL CÓDIGO
+                           CHECKOUT
            =========================================================== */
         stage('Checkout') {
             steps {
@@ -43,32 +43,29 @@ pipeline {
                     ])
 
                     if (!fileExists('Dockerfile')) {
-                        error("No existe Dockerfile en raíz.")
+                        error("❌ No existe Dockerfile en raíz.")
                     }
-
                     if (!fileExists('pom.xml') && !fileExists('build.gradle')) {
-                        error("Código inválido: no existe pom.xml ni build.gradle.")
+                        error("❌ No existe pom.xml ni build.gradle. Checkout inválido.")
                     }
 
-                    echo "✔ Checkout completado y validado."
+                    echo "✔ Checkout completado correctamente."
                 }
             }
         }
 
         /* ===========================================================
-                           COMPILACIÓN MAVEN
+                           COMPILACIÓN
            =========================================================== */
         stage('Compile') {
             when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
-                sh """
-                    mvn clean package -DskipTests
-                """
+                sh 'mvn clean package -DskipTests'
             }
         }
 
         /* ===========================================================
-                          BUILD DOCKER IMAGE
+                           BUILD DOCKER
            =========================================================== */
         stage('Build Image') {
             when { expression { params.ENVIRONMENT != 'prod' } }
@@ -86,23 +83,24 @@ pipeline {
         }
 
         /* ===========================================================
-                           PUSH DOCKER IMAGE
+                             PUSH DOCKER
            =========================================================== */
         stage('Push Image') {
             when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
                 script {
 
-                    def registry     = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
-                    def registryCred = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGCRED"]
+                    def registry = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
+                    def tokenId  = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
 
+                    // Token por ambiente (desa/certi/prod)
                     withCredentials([
-                        usernamePassword(credentialsId: registryCred,
-                        usernameVariable: 'REG_USR', passwordVariable: 'REG_PWD')
+                        string(credentialsId: tokenId, variable: 'OCP_TOKEN')
                     ]) {
+
                         sh """
-                            echo "${REG_PWD}" | docker login ${registry} -u "${REG_USR}" --password-stdin
-                            docker push ${registry}/${APP_NAME}:${params.VERSION ?: "latest"}
+                            echo "\${OCP_TOKEN}" | docker login ${registry} -u openshift --password-stdin
+                            docker push ${registry}/${APP_NAME}:${params.VERSION ?: 'latest'}
                         """
                     }
                 }
@@ -110,7 +108,7 @@ pipeline {
         }
 
         /* ===========================================================
-                     PROMOVER IMAGEN CERTIFICADA A PROD
+                      PROMOTE CERTI → PROD
            =========================================================== */
         stage('Promote to PROD') {
             when { expression { params.ENVIRONMENT == 'prod' } }
@@ -118,7 +116,7 @@ pipeline {
                 script {
 
                     if (!params.VERSION?.trim()) {
-                        error("ERROR: Para PROD debe ingresar una VERSION certificada.")
+                        error("❌ Para producción debe ingresar VERSION certificada.")
                     }
 
                     def regCerti = env["OCP_CERTI_REGISTRY"]
@@ -136,37 +134,32 @@ pipeline {
         }
 
         /* ===========================================================
-                              DEPLOY OCP
+                                   DEPLOY OCP
            =========================================================== */
         stage("Deploy") {
             steps {
                 script {
 
                     def api         = env["OCP_${params.ENVIRONMENT.toUpperCase()}_API"]
-                    def cred        = env["OCP_${params.ENVIRONMENT.toUpperCase()}_CRED"]
+                    def cred        = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
                     def registry    = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def registryPull = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGPULL"]
 
                     echo "Validando namespace destino: ${NAMESPACE}"
 
-                    withCredentials([
-                        usernamePassword(credentialsId: cred,
-                        usernameVariable: 'USR', passwordVariable: 'PWD')
-                    ]) {
+                    withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
 
                         sh """
                             oc logout || true
-                            oc login ${api} -u "${USR}" -p "${PWD}" --insecure-skip-tls-verify=true
+                            oc login ${api} --token="\${TOKEN}" --insecure-skip-tls-verify=true
                             oc get project ${NAMESPACE}
                         """
 
+                        // Dry-run
                         sh """
-                            echo "Validando YAML con dry-run..."
-                        """
-
-                        sh """
+                            echo "Validando YAML (dry-run)..."
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
-                                echo "Validando: \$f";
+                                echo "Validando: \$f"
 
                                 sed -e "s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g" \
                                     -e "s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g" \
@@ -179,8 +172,9 @@ pipeline {
                             done
                         """
 
+                        // Apply real
                         sh """
-                            echo "Aplicando YAML a OpenShift..."
+                            echo "Aplicando manifiestos..."
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
                                 sed -e "s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g" \
                                     -e "s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g" \
@@ -204,25 +198,28 @@ pipeline {
     }
 
     /* ===========================================================
-                            ROLLBACK
+                             ROLLBACK
        =========================================================== */
     post {
         failure {
             script {
 
                 def api  = env["OCP_${params.ENVIRONMENT.toUpperCase()}_API"]
-                def cred = env["OCP_${params.ENVIRONMENT.toUpperCase()}_CRED"]
+                def cred = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
 
-                withCredentials([
-                    usernamePassword(credentialsId: cred,
-                    usernameVariable: 'USR', passwordVariable: 'PWD')
-                ]) {
+                withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
 
                     sh """
-                        echo 'Rollback iniciado...'
-                        oc login ${api} -u "${USR}" -p "${PWD}" --insecure-skip-tls-verify=true
-                        oc delete -f deploy/${params.ENVIRONMENT}/ --ignore-not-found=true
+                        echo "Rollback iniciado…"
+                        oc login ${api} --token="\${TOKEN}" --insecure-skip-tls-verify=true
                     """
+
+                    // Rollback solo si existe carpeta deploy/*
+                    if (fileExists("deploy/${params.ENVIRONMENT}")) {
+                        sh "oc delete -f deploy/${params.ENVIRONMENT}/ --ignore-not-found=true"
+                    } else {
+                        echo "⚠ No existe carpeta deploy/${params.ENVIRONMENT}, rollback limitado."
+                    }
                 }
             }
         }
