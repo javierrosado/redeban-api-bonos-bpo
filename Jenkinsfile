@@ -94,18 +94,19 @@ pipeline {
                     def registryCred = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGCRED"]
 
                     withCredentials([
-                        usernamePassword(credentialsId: registryCred,
-                        usernameVariable: 'REG_USR', passwordVariable: 'REG_PWD')
+                        usernamePassword(credentialsId: registryCred, usernameVariable: 'REG_USR', passwordVariable: 'REG_PWD')
                     ]) {
 
-                        sh '''
-                            echo "$REG_PWD" | docker login '"${registry}"' -u "$REG_USR" --password-stdin
-                            docker push '"${registry}"'/'"${APP_NAME}"':'"${params.VERSION ?: "latest"}"'
-                        '''
+                        sh """
+                            echo "${REG_PWD}" | docker login ${registry} -u "${REG_USR}" --password-stdin
+
+                            docker push ${registry}/${APP_NAME}:${params.VERSION ?: "latest"}
+                        """
                     }
                 }
             }
         }
+
 
         /* ===========================================================
                        PROMOVER IMAGEN CERTIFICADA A PROD
