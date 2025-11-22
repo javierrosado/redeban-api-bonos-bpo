@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: __APP_NAME__
+  namespace: __NAMESPACE__
+  labels:
+    app: __APP_NAME__
+    version: "__VERSION__"
+spec:
+  host: "__ROUTE_HOST__"
+  path: "__APP_CONTEXT__"
+  to:
+    kind: Service
+    name: __APP_NAME__
+  port:
+    targetPort: https
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

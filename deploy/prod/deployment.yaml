@@ -1,0 +1,244 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __APP_NAME__
+  namespace: __NAMESPACE__
+  labels:
+    app: __APP_NAME__
+    version: "__VERSION__"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: __APP_NAME__
+  template:
+    metadata:
+      labels:
+        app: __APP_NAME__
+        version: "__VERSION__"
+    spec:
+      containers:
+        - name: __APP_NAME__
+          image: __REGISTRY_PULL__/__NAMESPACE__/__APP_NAME__:__VERSION__
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: APP_CONTEXT
+              value: "__APP_CONTEXT__"
+            - name: BONOS_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DATASOURCE_URL
+            - name: BONOS_DATASOURCE_DRIVER
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DATASOURCE_DRIVER
+            - name: BONOS_DATASOURCE_LOGIN_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DATASOURCE_LOGIN_TIMEOUT
+            - name: BONOS_AS400_SP
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_AS400_SP
+            - name: BONOS_CODIGO_APLICACION
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_APLICACION
+            - name: BONOS_CODIGO_SWITCH
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_SWITCH
+            - name: BONOS_CODIGO_NOVEDAD_CREAR
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_NOVEDAD_CREAR
+            - name: BONOS_CODIGO_NOVEDAD_ACTIVAR
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_NOVEDAD_ACTIVAR
+            - name: BONOS_CODIGO_NOVEDAD_CONSULTAR
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_NOVEDAD_CONSULTAR
+            - name: BONOS_CODIGO_TX_ACTIVACION
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_TX_ACTIVACION
+            - name: BONOS_DISPOSITIVO_ACTIVACION
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DISPOSITIVO_ACTIVACION
+            - name: BONOS_TIPO_TX_ACTIVACION
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_TIPO_TX_ACTIVACION
+            - name: BONOS_NUMERO_BIN_CONSULTAR
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_NUMERO_BIN_CONSULTAR
+            - name: BONOS_DOCUMENTO_CC
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DOCUMENTO_CC
+            - name: BONOS_DOCUMENTO_NI
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DOCUMENTO_NI
+            - name: BONOS_DOCUMENTO_CE
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DOCUMENTO_CE
+            - name: BONOS_DOCUMENTO_TI
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DOCUMENTO_TI
+            - name: BONOS_DOCUMENTO_PS
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DOCUMENTO_PS
+            - name: BONOS_DOCUMENTO_NU
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DOCUMENTO_NU
+            - name: BONOS_DOCUMENTO_RC
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DOCUMENTO_RC
+            - name: BONOS_CODIGO_E01
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_E01
+            - name: BONOS_CODIGO_E03
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_E03
+            - name: BONOS_CODIGO_E08
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_E08
+            - name: BONOS_CODIGO_E09
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_E09
+            - name: BONOS_CODIGO_E10
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_E10
+            - name: BONOS_CODIGO_E11
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_E11
+            - name: BONOS_CODIGO_E12
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_CODIGO_E12
+            - name: BONOS_DESCRIPCION_E01
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DESCRIPCION_E01
+            - name: BONOS_DESCRIPCION_E03
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DESCRIPCION_E03
+            - name: BONOS_DESCRIPCION_E08
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DESCRIPCION_E08
+            - name: BONOS_DESCRIPCION_E09
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DESCRIPCION_E09
+            - name: BONOS_DESCRIPCION_E10
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DESCRIPCION_E10
+            - name: BONOS_DESCRIPCION_E11
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DESCRIPCION_E11
+            - name: BONOS_DESCRIPCION_E12
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: BONOS_DESCRIPCION_E12
+            - name: HTTP_OK
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: HTTP_OK
+            - name: HTTP_ERROR_GENERAL
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: HTTP_ERROR_GENERAL
+            - name: HTTP_ERROR_ESTRUCTURA
+              valueFrom:
+                configMapKeyRef:
+                  name: __APP_NAME__-config
+                  key: HTTP_ERROR_ESTRUCTURA
+            - name: BONOS_DATASOURCE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: __APP_NAME__-secret
+                  key: BONOS_DATASOURCE_USER
+            - name: BONOS_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: __APP_NAME__-secret
+                  key: BONOS_DATASOURCE_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: __APP_CONTEXT__/q/health/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: __APP_CONTEXT__/q/health/live
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      restartPolicy: Always
