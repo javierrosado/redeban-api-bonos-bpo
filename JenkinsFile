@@ -3,9 +3,10 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'BRANCH', defaultValue: 'develop', description: 'Rama Git a utilizar')
-        choice(name: 'ENVIRONMENT', choices: ['desa', 'certi', 'prod'], description: 'Ambiente de despliegue')
-        string(name: 'VERSION', defaultValue: '', description: 'Versión certificada (obligatorio para PROD)')
+        string(name: 'BRANCH', defaultValue: 'main', description: 'Rama Git a utilizar')
+        //choice(name: 'ENVIRONMENT', choices: ['desa', 'certi', 'prod'], description: 'Ambiente de despliegue')
+        choice(name: 'ENVIRONMENT', choices: ['desa'], description: 'Ambiente de despliegue')
+        string(name: 'VERSION', defaultValue: '1.0.1', description: 'Versión certificada (obligatorio para PROD)')
     }
 
     environment {
