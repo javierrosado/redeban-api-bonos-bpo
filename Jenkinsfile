@@ -3,33 +3,36 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'BRANCH', defaultValue: 'main', description: 'Rama Git a utilizar')
-        //choice(name: 'ENVIRONMENT', choices: ['desa', 'certi', 'prod'], description: 'Ambiente de despliegue')
-        choice(name: 'ENVIRONMENT', choices: ['desa'], description: 'Ambiente de despliegue')
-        string(name: 'VERSION', defaultValue: '1.0.1', description: 'Versión certificada (obligatorio para PROD)')
+        string(name: 'BRANCH', defaultValue: 'main', description: 'Rama Git a desplegar')
+        choice(name: 'ENVIRONMENT', choices: ['desa','certi','prod'], description: 'Ambiente de despliegue')
+        string(name: 'VERSION', defaultValue: '', description: 'Versión certificada (obligatorio para PROD)')
+        string(name: 'ROLLOUT_TIMEOUT', defaultValue: '300s', description: 'Timeout del rollout')
     }
 
     environment {
         APP_NAME   = "redeban-api-bonos-bpo"
+        NAMESPACE  = "redeban-bonos-bpo"
 
-        // YAML placeholders
-        PLACEHOLDER_NAMESPACE   = "NAMESPACE"
-        PLACEHOLDER_APP_NAME    = "APP_NAME"
-        PLACEHOLDER_APP_CONTEXT = "APP_CONTEXT"
-        PLACEHOLDER_VERSION     = "VERSION"
-        PLACEHOLDER_REGISTRY    = "REGISTRY"
-        PLACEHOLDER_REGPULL     = "REGISTRY_PULL"
-        PLACEHOLDER_ROUTE_HOST  = "ROUTE_HOST"
+        // Placeholder exactos del proyecto
+        PLACEHOLDER_NAMESPACE   = "__NAMESPACE__"
+        PLACEHOLDER_APP_NAME    = "__APP_NAME__"
+        PLACEHOLDER_APP_CONTEXT = "__APP_CONTEXT__"
+        PLACEHOLDER_VERSION     = "__VERSION__"
+        PLACEHOLDER_REGISTRY    = "__REGISTRY__"
+        PLACEHOLDER_REGPULL     = "__REGISTRY_PULL__"
+        PLACEHOLDER_ROUTE_HOST  = "__ROUTE_HOST__"
     }
 
     stages {
 
         /* ===========================================================
-                         CHECKOUT DEL CÓDIGO
+                           CHECKOUT DEL CÓDIGO
            =========================================================== */
         stage('Checkout') {
             steps {
                 script {
+                    echo "Realizando checkout de la rama: ${params.BRANCH}"
+
                     checkout([
                         $class: 'GitSCM',
                         branches: [[name: params.BRANCH]],
@@ -38,37 +41,50 @@ pipeline {
                             credentialsId: env.GIT_CREDENTIALS
                         ]]
                     ])
+
+                    if (!fileExists('Dockerfile')) {
+                        error("ERROR: No se encontró Dockerfile en el checkout.")
+                    }
+
+                    if (!fileExists('pom.xml') && !fileExists('build.gradle')) {
+                        error("ERROR: No existe pom.xml ni build.gradle. El checkout del código ha fallado.")
+                    }
+
+                    echo "✔ Checkout validado correctamente."
                 }
             }
         }
 
         /* ===========================================================
-                       COMPILAR (solo desa/certi)
+                         COMPILACIÓN (solo desa/certi)
            =========================================================== */
         stage('Compile') {
             when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
-                sh "mvn clean package -DskipTests"
+                sh '''
+                    mvn clean package -DskipTests
+                '''
             }
         }
 
         /* ===========================================================
-             CONSTRUIR IMAGEN (solo desa/certi)
+                        BUILD DOCKER (solo desa/certi)
            =========================================================== */
         stage('Build Image') {
             when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
                 script {
                     def registry = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
+
                     sh """
-                        docker build -t ${registry}/${APP_NAME}:${params.VERSION ?: "latest"} .
+                        docker build -f Dockerfile -t ${registry}/${APP_NAME}:${params.VERSION ?: "latest"} .
                     """
                 }
             }
         }
 
         /* ===========================================================
-                 HACER PUSH AL REGISTRY (solo desa/certi)
+                               PUSH DOCKER
            =========================================================== */
         stage('Push Image') {
             when { expression { params.ENVIRONMENT != 'prod' } }
@@ -77,20 +93,22 @@ pipeline {
                     def registry     = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def registryCred = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGCRED"]
 
-                    withCredentials([usernamePassword(credentialsId: registryCred,
-                        usernameVariable: 'REG_USR', passwordVariable: 'REG_PWD')]) {
+                    withCredentials([
+                        usernamePassword(credentialsId: registryCred,
+                        usernameVariable: 'REG_USR', passwordVariable: 'REG_PWD')
+                    ]) {
 
-                        sh """
-                            echo "${REG_PWD}" | docker login ${registry} -u "${REG_USR}" --password-stdin
-                            docker push ${registry}/${APP_NAME}:${params.VERSION ?: "latest"}
-                        """
+                        sh '''
+                            echo "$REG_PWD" | docker login '"${registry}"' -u "$REG_USR" --password-stdin
+                            docker push '"${registry}"'/'"${APP_NAME}"':'"${params.VERSION ?: "latest"}"'
+                        '''
                     }
                 }
             }
         }
 
         /* ===========================================================
-                   PROMOVER IMAGEN CERTIFICADA A PRODUCCIÓN
+                       PROMOVER IMAGEN CERTIFICADA A PROD
            =========================================================== */
         stage('Promote to PROD') {
             when { expression { params.ENVIRONMENT == 'prod' } }
@@ -105,16 +123,11 @@ pipeline {
                     def version  = params.VERSION
 
                     sh """
-                        echo "🔍 Validando que imagen certificada exista..."
+                        echo "Validando imagen certificada..."
                         docker manifest inspect ${regCerti}/${APP_NAME}:${version} || exit 1
-                        
-                        echo "⬇ Descargando imagen certificada..."
+
                         docker pull ${regCerti}/${APP_NAME}:${version}
-
-                        echo "🏷 Promoviendo imagen a producción..."
-                        docker tag  ${regCerti}/${APP_NAME}:${version}  ${regProd}/${APP_NAME}:${version}
-
-                        echo "⬆ Subiendo imagen a producción..."
+                        docker tag  ${regCerti}/${APP_NAME}:${version} ${regProd}/${APP_NAME}:${version}
                         docker push ${regProd}/${APP_NAME}:${version}
                     """
                 }
@@ -122,34 +135,64 @@ pipeline {
         }
 
         /* ===========================================================
-            DESPLIEGUE OCP CON PLACEHOLDERS ESTILO PS1
+                         DESPLIEGUE OPENSHIFT
            =========================================================== */
-        stage('Deploy') {
+        stage("Deploy") {
             steps {
                 script {
+
                     def api         = env["OCP_${params.ENVIRONMENT.toUpperCase()}_API"]
+                    def cred        = env["OCP_${params.ENVIRONMENT.toUpperCase()}_CRED"]
                     def registry    = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def registryPull = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGPULL"]
-                    def cred        = env["OCP_${params.ENVIRONMENT.toUpperCase()}_CRED"]
 
-                    withCredentials([usernamePassword(credentialsId: cred,
-                        usernameVariable: 'USR', passwordVariable: 'PWD')]) {
+                    echo "Validando namespace: ${NAMESPACE}"
+
+                    withCredentials([
+                        usernamePassword(credentialsId: cred, usernameVariable: 'USR', passwordVariable: 'PWD')
+                    ]) {
+
+                        sh '''
+                            oc logout || true
+                            oc login '"${api}"' -u "$USR" -p "$PWD" --insecure-skip-tls-verify=true
+                        '''
 
                         sh """
-                            oc login ${api} -u ${USR} -p ${PWD}
-                            oc project ${APP_NAME}
+                            oc get project ${NAMESPACE} || exit 1
+                        """
 
+                        sh "echo Namespace validado: ${NAMESPACE}"
+
+                        sh """
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
-                                sed -e "s|__${PLACEHOLDER_APP_NAME}__|${APP_NAME}|g" \
-                                    -e "s|__${PLACEHOLDER_VERSION}__|${params.VERSION ?: "latest"}|g" \
-                                    -e "s|__${PLACEHOLDER_NAMESPACE}__|${APP_NAME}|g" \
-                                    -e "s|__${PLACEHOLDER_REGISTRY}__|${registry}|g" \
-                                    -e "s|__${PLACEHOLDER_REGPULL}__|${registryPull}|g" \
-                                    "\$f" | oc apply -f -
+                                echo \"Validando YAML: \$f\";
+                                sed -e \"s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g\" \
+                                    -e \"s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g\" \
+                                    -e \"s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g\" \
+                                    -e \"s|${PLACEHOLDER_REGISTRY}|${registry}|g\" \
+                                    -e \"s|${PLACEHOLDER_REGPULL}|${registryPull}|g\" \
+                                    -e \"s|${PLACEHOLDER_APP_CONTEXT}|${APP_NAME}|g\" \
+                                    -e \"s|${PLACEHOLDER_ROUTE_HOST}|${APP_NAME}.${params.ENVIRONMENT}.apps|g\" \
+                                    \"\$f\" | oc apply --dry-run=client -f - || exit 1
                             done
+                        """
 
+                        sh """
+                            for f in deploy/${params.ENVIRONMENT}/*.yaml; do
+                                sed -e \"s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g\" \
+                                    -e \"s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g\" \
+                                    -e \"s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g\" \
+                                    -e \"s|${PLACEHOLDER_REGISTRY}|${registry}|g\" \
+                                    -e \"s|${PLACEHOLDER_REGPULL}|${registryPull}|g\" \
+                                    -e \"s|${PLACEHOLDER_APP_CONTEXT}|${APP_NAME}|g\" \
+                                    -e \"s|${PLACEHOLDER_ROUTE_HOST}|${APP_NAME}.${params.ENVIRONMENT}.apps|g\" \
+                                    \"\$f\" | oc apply -f -
+                            done
+                        """
+
+                        sh """
                             oc rollout restart deployment/${APP_NAME}
-                            oc rollout status deployment/${APP_NAME} --timeout=120s
+                            oc rollout status deployment/${APP_NAME} --timeout=${params.ROLLOUT_TIMEOUT}
                         """
                     }
                 }
@@ -158,29 +201,27 @@ pipeline {
     }
 
     /* ===========================================================
-              ROLLBACK AUTOMÁTICO ANTE FALLAS
+                        ROLLBACK AUTOMÁTICO
        =========================================================== */
     post {
         failure {
             script {
-                def api   = env["OCP_${params.ENVIRONMENT.toUpperCase()}_API"]
-                def cred  = env["OCP_${params.ENVIRONMENT.toUpperCase()}_CRED"]
+                def api  = env["OCP_${params.ENVIRONMENT.toUpperCase()}_API"]
+                def cred = env["OCP_${params.ENVIRONMENT.toUpperCase()}_CRED"]
 
-                withCredentials([usernamePassword(credentialsId: cred,
-                    usernameVariable: 'USR', passwordVariable: 'PWD')]) {
+                withCredentials([
+                    usernamePassword(credentialsId: cred,
+                    usernameVariable: 'USR', passwordVariable: 'PWD')
+                ]) {
+
+                    sh '''
+                        echo "⚠️ Error detectado: ejecutando rollback…";
+
+                        oc login '"${api}"' -u "$USR" -p "$PWD" --insecure-skip-tls-verify=true
+                    '''
 
                     sh """
-                        echo "⚠️ Error detectado: ejecutando rollback (undeploy)"
-
-                        oc login ${api} -u ${USR} -p ${PWD}
-                        oc project ${APP_NAME}
-
-                        oc delete deployment ${APP_NAME} --ignore-not-found
-                        oc delete route ${APP_NAME} --ignore-not-found
-                        oc delete service ${APP_NAME} --ignore-not-found
-                        oc delete configmap ${APP_NAME} --ignore-not-found
-                        oc delete secret ${APP_NAME} --ignore-not-found
-                        oc delete hpa ${APP_NAME} --ignore-not-found
+                        oc delete -f deploy/${params.ENVIRONMENT}/ --ignore-not-found=true
                     """
                 }
             }
