@@ -75,8 +75,8 @@ pipeline {
 
                     sh """
                         docker build \
-                            -t ${registry}/${APP_NAME}:${params.VERSION ?: "latest"} \
-                            -f Dockerfile .
+                        -t ${registry}/${NAMESPACE}/${APP_NAME}:${params.VERSION ?: "latest"} \
+                        -f Dockerfile .
                     """
                 }
             }
@@ -100,7 +100,7 @@ pipeline {
 
                         sh """
                             echo "\${OCP_TOKEN}" | docker login ${registry} -u openshift --password-stdin
-                            docker push ${registry}/${APP_NAME}:${params.VERSION ?: 'latest'}
+                            docker push ${registry}/${NAMESPACE}/${APP_NAME}:${params.VERSION ?: 'latest'}
                         """
                     }
                 }
