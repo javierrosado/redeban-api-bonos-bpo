@@ -5,8 +5,9 @@
 # Usa UBI OpenJDK 21 + Maven y permite       #
 # reutilizar el repositorio ~/.m2 del host.  #
 ###############################################
-#ARG BASE_IMAGE=default-route-openshift-image-registry.apps-crc.testing/redeban-base-image/java21-runtime:1.0.0
-ARG BASE_IMAGE=registry.access.redhat.com/ubi9/openjdk-21-runtime
+##ARG BASE_IMAGE=default-route-openshift-image-registry.apps-crc.testing/redeban-base-image/java21-runtime:1.0.0
+##ARG BASE_IMAGE=registry.access.redhat.com/ubi9/openjdk-21-runtime
+ARG BASE_IMAGE=image-registry.openshift-image-registry.svc:5000/redeban-base-image/java21-runtime:1.0.0
 FROM ${BASE_IMAGE}
 
 WORKDIR /work
