@@ -10,10 +10,10 @@ pipeline {
     }
 
     environment {
+
         APP_NAME   = "redeban-api-bonos-bpo"
         NAMESPACE  = "redeban-bonos-bpo"
 
-        // Placeholder exactos del proyecto
         PLACEHOLDER_NAMESPACE   = "__NAMESPACE__"
         PLACEHOLDER_APP_NAME    = "__APP_NAME__"
         PLACEHOLDER_APP_CONTEXT = "__APP_CONTEXT__"
@@ -26,12 +26,12 @@ pipeline {
     stages {
 
         /* ===========================================================
-                           CHECKOUT DEL CÓDIGO
+                          CHECKOUT DEL CÓDIGO
            =========================================================== */
         stage('Checkout') {
             steps {
                 script {
-                    echo "Realizando checkout de la rama: ${params.BRANCH}"
+                    echo "Haciendo checkout de la rama: ${params.BRANCH}"
 
                     checkout([
                         $class: 'GitSCM',
@@ -43,32 +43,32 @@ pipeline {
                     ])
 
                     if (!fileExists('Dockerfile')) {
-                        error("ERROR: No se encontró Dockerfile en el checkout.")
+                        error("No existe Dockerfile en raíz.")
                     }
 
                     if (!fileExists('pom.xml') && !fileExists('build.gradle')) {
-                        error("ERROR: No existe pom.xml ni build.gradle. El checkout del código ha fallado.")
+                        error("Código inválido: no existe pom.xml ni build.gradle.")
                     }
 
-                    echo "✔ Checkout validado correctamente."
+                    echo "✔ Checkout completado y validado."
                 }
             }
         }
 
         /* ===========================================================
-                         COMPILACIÓN (solo desa/certi)
+                           COMPILACIÓN MAVEN
            =========================================================== */
         stage('Compile') {
             when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
-                sh '''
+                sh """
                     mvn clean package -DskipTests
-                '''
+                """
             }
         }
 
         /* ===========================================================
-                        BUILD DOCKER (solo desa/certi)
+                          BUILD DOCKER IMAGE
            =========================================================== */
         stage('Build Image') {
             when { expression { params.ENVIRONMENT != 'prod' } }
@@ -77,29 +77,31 @@ pipeline {
                     def registry = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
 
                     sh """
-                        docker build -f Dockerfile -t ${registry}/${APP_NAME}:${params.VERSION ?: "latest"} .
+                        docker build \
+                            -t ${registry}/${APP_NAME}:${params.VERSION ?: "latest"} \
+                            -f Dockerfile .
                     """
                 }
             }
         }
 
         /* ===========================================================
-                               PUSH DOCKER
+                           PUSH DOCKER IMAGE
            =========================================================== */
         stage('Push Image') {
             when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
                 script {
+
                     def registry     = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def registryCred = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGCRED"]
 
                     withCredentials([
-                        usernamePassword(credentialsId: registryCred, usernameVariable: 'REG_USR', passwordVariable: 'REG_PWD')
+                        usernamePassword(credentialsId: registryCred,
+                        usernameVariable: 'REG_USR', passwordVariable: 'REG_PWD')
                     ]) {
-
                         sh """
                             echo "${REG_PWD}" | docker login ${registry} -u "${REG_USR}" --password-stdin
-
                             docker push ${registry}/${APP_NAME}:${params.VERSION ?: "latest"}
                         """
                     }
@@ -107,36 +109,34 @@ pipeline {
             }
         }
 
-
         /* ===========================================================
-                       PROMOVER IMAGEN CERTIFICADA A PROD
+                     PROMOVER IMAGEN CERTIFICADA A PROD
            =========================================================== */
         stage('Promote to PROD') {
             when { expression { params.ENVIRONMENT == 'prod' } }
             steps {
                 script {
+
                     if (!params.VERSION?.trim()) {
-                        error("ERROR: Para producción debe ingresar VERSION certificada.")
+                        error("ERROR: Para PROD debe ingresar una VERSION certificada.")
                     }
 
                     def regCerti = env["OCP_CERTI_REGISTRY"]
                     def regProd  = env["OCP_PROD_REGISTRY"]
-                    def version  = params.VERSION
 
                     sh """
-                        echo "Validando imagen certificada..."
-                        docker manifest inspect ${regCerti}/${APP_NAME}:${version} || exit 1
+                        docker manifest inspect ${regCerti}/${APP_NAME}:${params.VERSION} || exit 1
 
-                        docker pull ${regCerti}/${APP_NAME}:${version}
-                        docker tag  ${regCerti}/${APP_NAME}:${version} ${regProd}/${APP_NAME}:${version}
-                        docker push ${regProd}/${APP_NAME}:${version}
+                        docker pull ${regCerti}/${APP_NAME}:${params.VERSION}
+                        docker tag  ${regCerti}/${APP_NAME}:${params.VERSION} ${regProd}/${APP_NAME}:${params.VERSION}
+                        docker push ${regProd}/${APP_NAME}:${params.VERSION}
                     """
                 }
             }
         }
 
         /* ===========================================================
-                         DESPLIEGUE OPENSHIFT
+                              DEPLOY OCP
            =========================================================== */
         stage("Deploy") {
             steps {
@@ -147,47 +147,49 @@ pipeline {
                     def registry    = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def registryPull = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGPULL"]
 
-                    echo "Validando namespace: ${NAMESPACE}"
+                    echo "Validando namespace destino: ${NAMESPACE}"
 
                     withCredentials([
-                        usernamePassword(credentialsId: cred, usernameVariable: 'USR', passwordVariable: 'PWD')
+                        usernamePassword(credentialsId: cred,
+                        usernameVariable: 'USR', passwordVariable: 'PWD')
                     ]) {
 
-                        sh '''
-                            oc logout || true
-                            oc login '"${api}"' -u "$USR" -p "$PWD" --insecure-skip-tls-verify=true
-                        '''
-
                         sh """
-                            oc get project ${NAMESPACE} || exit 1
+                            oc logout || true
+                            oc login ${api} -u "${USR}" -p "${PWD}" --insecure-skip-tls-verify=true
+                            oc get project ${NAMESPACE}
                         """
 
-                        sh "echo Namespace validado: ${NAMESPACE}"
+                        sh """
+                            echo "Validando YAML con dry-run..."
+                        """
 
                         sh """
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
-                                echo \"Validando YAML: \$f\";
-                                sed -e \"s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g\" \
-                                    -e \"s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g\" \
-                                    -e \"s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g\" \
-                                    -e \"s|${PLACEHOLDER_REGISTRY}|${registry}|g\" \
-                                    -e \"s|${PLACEHOLDER_REGPULL}|${registryPull}|g\" \
-                                    -e \"s|${PLACEHOLDER_APP_CONTEXT}|${APP_NAME}|g\" \
-                                    -e \"s|${PLACEHOLDER_ROUTE_HOST}|${APP_NAME}.${params.ENVIRONMENT}.apps|g\" \
-                                    \"\$f\" | oc apply --dry-run=client -f - || exit 1
+                                echo "Validando: \$f";
+
+                                sed -e "s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g" \
+                                    -e "s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g" \
+                                    -e "s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g" \
+                                    -e "s|${PLACEHOLDER_REGISTRY}|${registry}|g" \
+                                    -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \
+                                    -e "s|${PLACEHOLDER_APP_CONTEXT}|${APP_NAME}|g" \
+                                    -e "s|${PLACEHOLDER_ROUTE_HOST}|${APP_NAME}.${params.ENVIRONMENT}.apps|g" \
+                                    "\$f" | oc apply --dry-run=client -f - || exit 1
                             done
                         """
 
                         sh """
+                            echo "Aplicando YAML a OpenShift..."
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
-                                sed -e \"s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g\" \
-                                    -e \"s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g\" \
-                                    -e \"s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g\" \
-                                    -e \"s|${PLACEHOLDER_REGISTRY}|${registry}|g\" \
-                                    -e \"s|${PLACEHOLDER_REGPULL}|${registryPull}|g\" \
-                                    -e \"s|${PLACEHOLDER_APP_CONTEXT}|${APP_NAME}|g\" \
-                                    -e \"s|${PLACEHOLDER_ROUTE_HOST}|${APP_NAME}.${params.ENVIRONMENT}.apps|g\" \
-                                    \"\$f\" | oc apply -f -
+                                sed -e "s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g" \
+                                    -e "s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g" \
+                                    -e "s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g" \
+                                    -e "s|${PLACEHOLDER_REGISTRY}|${registry}|g" \
+                                    -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \
+                                    -e "s|${PLACEHOLDER_APP_CONTEXT}|${APP_NAME}|g" \
+                                    -e "s|${PLACEHOLDER_ROUTE_HOST}|${APP_NAME}.${params.ENVIRONMENT}.apps|g" \
+                                    "\$f" | oc apply -f -
                             done
                         """
 
@@ -202,11 +204,12 @@ pipeline {
     }
 
     /* ===========================================================
-                        ROLLBACK AUTOMÁTICO
+                            ROLLBACK
        =========================================================== */
     post {
         failure {
             script {
+
                 def api  = env["OCP_${params.ENVIRONMENT.toUpperCase()}_API"]
                 def cred = env["OCP_${params.ENVIRONMENT.toUpperCase()}_CRED"]
 
@@ -215,13 +218,9 @@ pipeline {
                     usernameVariable: 'USR', passwordVariable: 'PWD')
                 ]) {
 
-                    sh '''
-                        echo "⚠️ Error detectado: ejecutando rollback…";
-
-                        oc login '"${api}"' -u "$USR" -p "$PWD" --insecure-skip-tls-verify=true
-                    '''
-
                     sh """
+                        echo 'Rollback iniciado...'
+                        oc login ${api} -u "${USR}" -p "${PWD}" --insecure-skip-tls-verify=true
                         oc delete -f deploy/${params.ENVIRONMENT}/ --ignore-not-found=true
                     """
                 }
