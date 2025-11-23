@@ -136,6 +136,8 @@ pipeline {
                     def cred        = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
                     def registry    = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def registryPull = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGPULL"]
+                    def routeHost   = env["OCP_${params.ENVIRONMENT.toUpperCase()}_ROUTE_HOST"] ?: "${APP_NAME}.${params.ENVIRONMENT}.apps"
+                    def appContext  = env["OCP_${params.ENVIRONMENT.toUpperCase()}_APP_CONTEXT"] ?: "/${APP_NAME}"
 
                     withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
                         sh """
@@ -151,6 +153,8 @@ pipeline {
                                     -e "s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g" \
                                     -e "s|${PLACEHOLDER_REGISTRY}|${registry}|g" \
                                     -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \
+                                    -e "s|${PLACEHOLDER_ROUTE_HOST}|${routeHost}|g" \
+                                    -e "s|${PLACEHOLDER_APP_CONTEXT}|${appContext}|g" \
                                     "\$f" | oc apply --dry-run=client -f -
                             done
 
@@ -161,6 +165,8 @@ pipeline {
                                     -e "s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g" \
                                     -e "s|${PLACEHOLDER_REGISTRY}|${registry}|g" \
                                     -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \
+                                    -e "s|${PLACEHOLDER_ROUTE_HOST}|${routeHost}|g" \
+                                    -e "s|${PLACEHOLDER_APP_CONTEXT}|${appContext}|g" \
                                     "\$f" | oc apply -f -
                             done
 
