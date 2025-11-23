@@ -139,8 +139,9 @@ pipeline {
 
                     withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
                         sh """
-                            oc logout || true
+                            export KUBECONFIG=\$(mktemp)
                             oc login ${api} --token="\${TOKEN}" --insecure-skip-tls-verify=true
+                            oc whoami
                             oc project ${NAMESPACE}
 
                             echo "Validando YAML (dry-run)..."
