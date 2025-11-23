@@ -3,17 +3,20 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'BRANCH', defaultValue: 'main', description: 'Rama Git a desplegar')
-        choice(name: 'ENVIRONMENT', choices: ['desa','certi','prod'], description: 'Ambiente de despliegue')
-        string(name: 'VERSION', defaultValue: '', description: 'Versión certificada (obligatorio para PROD)')
-        string(name: 'ROLLOUT_TIMEOUT', defaultValue: '300s', description: 'Timeout del rollout')
+        string(name: 'BRANCH', defaultValue: 'main', description: 'Rama Git')
+        choice(name: 'ENVIRONMENT', choices: ['desa','certi','prod'], description: 'Ambiente')
+        string(name: 'VERSION', defaultValue: '', description: 'Versión (obligatorio para PROD)')
+        string(name: 'ROLLOUT_TIMEOUT', defaultValue: '300s', description: 'Timeout')
     }
 
     environment {
+
         APP_NAME   = "redeban-api-bonos-bpo"
         NAMESPACE  = "redeban-bonos-bpo"
 
-        /* Placeholders en los YAML */
+        // Base image corporativa local (ya cargada en Jenkins host)
+        BASE_IMAGE = "redeban-base-image/java21-runtime:1.0.0"
+
         PLACEHOLDER_NAMESPACE   = "__NAMESPACE__"
         PLACEHOLDER_APP_NAME    = "__APP_NAME__"
         PLACEHOLDER_APP_CONTEXT = "__APP_CONTEXT__"
@@ -21,11 +24,6 @@ pipeline {
         PLACEHOLDER_REGISTRY    = "__REGISTRY__"
         PLACEHOLDER_REGPULL     = "__REGISTRY_PULL__"
         PLACEHOLDER_ROUTE_HOST  = "__ROUTE_HOST__"
-
-        /* Imagen base corporativa por ambiente */
-        OCP_DESA_BASEIMAGE  = "image-registry.openshift-image-registry.svc:5000/redeban-base-image/java21-runtime:1.0.0"
-        OCP_CERTI_BASEIMAGE = "image-registry.openshift-image-registry.svc:5000/redeban-base-image/java21-runtime:1.0.0"
-        OCP_PROD_BASEIMAGE  = "image-registry.openshift-image-registry.svc:5000/redeban-base-image/java21-runtime:1.0.0"
     }
 
     stages {
@@ -36,7 +34,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 script {
-                    echo "📥 Haciendo checkout de la rama: ${params.BRANCH}"
+                    echo "Checkout de rama: ${params.BRANCH}"
 
                     checkout([
                         $class: 'GitSCM',
@@ -47,11 +45,10 @@ pipeline {
                         ]]
                     ])
 
-                    if (!fileExists('Dockerfile')) {
-                        error("❌ No existe Dockerfile en raíz.")
-                    }
+                    if (!fileExists('Dockerfile')) error("No existe Dockerfile.")
+                    if (!fileExists('pom.xml')) error("No existe pom.xml.")
 
-                    echo "✔ Checkout completado correctamente."
+                    echo "✔ Checkout validado."
                 }
             }
         }
@@ -67,24 +64,20 @@ pipeline {
         }
 
         /* ===========================================================
-                           BUILD DOCKER
+                        BUILD DOCKER (solo capas nuevas)
            =========================================================== */
         stage('Build Image') {
             when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
                 script {
 
-                    def registry  = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
-                    def baseImage = env["OCP_${params.ENVIRONMENT.toUpperCase()}_BASEIMAGE"]
-                    def tag       = params.VERSION ?: "latest"
-
-                    echo "🚧 Construyendo imagen con base: ${baseImage}"
+                    def tag = params.VERSION ?: "latest"
 
                     sh """
                         docker build \
-                            --build-arg BASE_IMAGE=${baseImage} \
-                            -t ${registry}/${NAMESPACE}/${APP_NAME}:${tag} \
-                            -f Dockerfile .
+                        --build-arg BASE_IMAGE=${BASE_IMAGE} \
+                        -t ${APP_NAME}:${tag} \
+                        -f Dockerfile .
                     """
                 }
             }
@@ -97,20 +90,18 @@ pipeline {
             when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
                 script {
-
                     def registry = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def tokenId  = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
                     def tag      = params.VERSION ?: "latest"
 
-                    withCredentials([string(credentialsId: tokenId, variable: 'OCP_TOKEN')]) {
+                    withCredentials([string(credentialsId: tokenId, variable: 'TOKEN')]) {
 
-                        echo "🔐 Login al registry: ${registry}"
                         sh """
-                            echo "\${OCP_TOKEN}" | docker login ${registry} -u openshift --password-stdin
-                        """
+                            echo "\${TOKEN}" | docker login ${registry} -u openshift --password-stdin
 
-                        echo "📤 Enviando imagen al registry…"
-                        sh """
+                            docker tag ${APP_NAME}:${tag} \
+                                       ${registry}/${NAMESPACE}/${APP_NAME}:${tag}
+
                             docker push ${registry}/${NAMESPACE}/${APP_NAME}:${tag}
                         """
                     }
@@ -119,75 +110,44 @@ pipeline {
         }
 
         /* ===========================================================
-                      PROMOTE CERTI → PROD
-           =========================================================== */
-        stage('Promote to PROD') {
-            when { expression { params.ENVIRONMENT == 'prod' } }
-            steps {
-                script {
-
-                    if (!params.VERSION?.trim()) {
-                        error("❌ Para producción debe ingresar VERSION certificada.")
-                    }
-
-                    def regCerti = env["OCP_CERTI_REGISTRY"]
-                    def regProd  = env["OCP_PROD_REGISTRY"]
-
-                    echo "📦 Promoviendo imagen CERTI → PROD"
-
-                    sh """
-                        docker manifest inspect ${regCerti}/${NAMESPACE}/${APP_NAME}:${params.VERSION} || exit 1
-
-                        docker pull ${regCerti}/${NAMESPACE}/${APP_NAME}:${params.VERSION}
-                        docker tag  ${regCerti}/${NAMESPACE}/${APP_NAME}:${params.VERSION} ${regProd}/${NAMESPACE}/${APP_NAME}:${params.VERSION}
-                        docker push ${regProd}/${NAMESPACE}/${APP_NAME}:${params.VERSION}
-                    """
-                }
-            }
-        }
-
-        /* ===========================================================
-                                   DEPLOY OCP
+                               DEPLOY OCP
            =========================================================== */
         stage("Deploy") {
             steps {
                 script {
 
-                    def api          = env["OCP_${params.ENVIRONMENT.toUpperCase()}_API"]
-                    def cred         = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
-                    def registry     = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
+                    def api         = env["OCP_${params.ENVIRONMENT.toUpperCase()}_API"]
+                    def cred        = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
+                    def registry    = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def registryPull = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGPULL"]
-                    def tag          = params.VERSION ?: "latest"
-
-                    echo "🚀 Desplegando en OCP ambiente: ${params.ENVIRONMENT}"
 
                     withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
 
                         sh """
                             oc logout || true
                             oc login ${api} --token="\${TOKEN}" --insecure-skip-tls-verify=true
-                            oc project ${NAMESPACE}
+                            oc get project ${NAMESPACE}
                         """
 
-                        echo "🔎 Validando manifiestos YAML"
-
                         sh """
+                            echo "Validando YAML (dry-run)..."
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
+
                                 sed -e "s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g" \
                                     -e "s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g" \
-                                    -e "s|${PLACEHOLDER_VERSION}|${tag}|g" \
+                                    -e "s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g" \
                                     -e "s|${PLACEHOLDER_REGISTRY}|${registry}|g" \
                                     -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \
-                                    "\$f" | oc apply --dry-run=client -f - || exit 1
+                                    "\$f" | oc apply --dry-run=client -f -
                             done
                         """
 
-                        echo "📡 Aplicando manifiestos en cluster"
                         sh """
+                            echo "Aplicando manifiestos..."
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
                                 sed -e "s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g" \
                                     -e "s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g" \
-                                    -e "s|${PLACEHOLDER_VERSION}|${tag}|g" \
+                                    -e "s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g" \
                                     -e "s|${PLACEHOLDER_REGISTRY}|${registry}|g" \
                                     -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \
                                     "\$f" | oc apply -f -
@@ -205,7 +165,7 @@ pipeline {
     }
 
     /* ===========================================================
-                             ROLLBACK
+                            ROLLBACK
        =========================================================== */
     post {
         failure {
@@ -217,14 +177,14 @@ pipeline {
                 withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
 
                     sh """
-                        echo "Rollback iniciado…"
+                        echo "Rollback iniciado..."
                         oc login ${api} --token="\${TOKEN}" --insecure-skip-tls-verify=true
                     """
 
                     if (fileExists("deploy/${params.ENVIRONMENT}")) {
                         sh "oc delete -f deploy/${params.ENVIRONMENT}/ --ignore-not-found=true"
                     } else {
-                        echo "⚠ No existe carpeta deploy/${params.ENVIRONMENT}, rollback limitado."
+                        echo "⚠ No existe carpeta deploy/${params.ENVIRONMENT}, rollback parcial."
                     }
                 }
             }
