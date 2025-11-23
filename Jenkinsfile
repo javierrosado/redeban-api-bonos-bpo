@@ -123,17 +123,13 @@ pipeline {
                     def registryPull = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGPULL"]
 
                     withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
-
                         sh """
                             oc logout || true
                             oc login ${api} --token="\${TOKEN}" --insecure-skip-tls-verify=true
-                            oc get project ${NAMESPACE}
-                        """
+                            oc project ${NAMESPACE}
 
-                        sh """
                             echo "Validando YAML (dry-run)..."
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
-
                                 sed -e "s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g" \
                                     -e "s|${PLACEHOLDER_APP_NAME}|${APP_NAME}|g" \
                                     -e "s|${PLACEHOLDER_VERSION}|${params.VERSION ?: 'latest'}|g" \
@@ -141,9 +137,7 @@ pipeline {
                                     -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \
                                     "\$f" | oc apply --dry-run=client -f -
                             done
-                        """
 
-                        sh """
                             echo "Aplicando manifiestos..."
                             for f in deploy/${params.ENVIRONMENT}/*.yaml; do
                                 sed -e "s|${PLACEHOLDER_NAMESPACE}|${NAMESPACE}|g" \
@@ -153,9 +147,7 @@ pipeline {
                                     -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \
                                     "\$f" | oc apply -f -
                             done
-                        """
 
-                        sh """
                             oc rollout restart deployment/${APP_NAME}
                             oc rollout status deployment/${APP_NAME} --timeout=${params.ROLLOUT_TIMEOUT}
                         """
