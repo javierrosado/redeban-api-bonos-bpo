@@ -147,7 +147,7 @@ pipeline {
 
                     withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
                         sh """
-                            export KUBECONFIG=$(mktemp)
+                            export KUBECONFIG=\$(mktemp)
                             oc login ${api} --token="${TOKEN}" --insecure-skip-tls-verify=true
                             oc whoami
                             oc project ${NAMESPACE}
@@ -161,7 +161,7 @@ pipeline {
                                     -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \\
                                     -e "s|${PLACEHOLDER_ROUTE_HOST}|${routeHost}|g" \\
                                     -e "s|${PLACEHOLDER_APP_CONTEXT}|${appContext}|g" \\
-                                    "$f" | oc apply --dry-run=client -f -
+                                    "\$f" | oc apply --dry-run=client -f -
                             done
 
                             echo "Aplicando manifiestos..."
@@ -173,7 +173,7 @@ pipeline {
                                     -e "s|${PLACEHOLDER_REGPULL}|${registryPull}|g" \\
                                     -e "s|${PLACEHOLDER_ROUTE_HOST}|${routeHost}|g" \\
                                     -e "s|${PLACEHOLDER_APP_CONTEXT}|${appContext}|g" \\
-                                    "$f" | oc apply -f -
+                                    "\$f" | oc apply -f -
                             done
 
                             oc rollout restart deployment/${APP_NAME}
@@ -198,7 +198,7 @@ pipeline {
                 withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
 
                     sh """
-                        export KUBECONFIG=$(mktemp)
+                        export KUBECONFIG=\$(mktemp)
                         echo "Rollback iniciado..."
                         oc login ${api} --token="${TOKEN}" --insecure-skip-tls-verify=true
                     """
