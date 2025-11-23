@@ -71,11 +71,12 @@ pipeline {
             steps {
                 script {
 
-                    def tag = params.VERSION ?: "latest"
+                    def tag       = params.VERSION ?: "latest"
+                    def baseImage = env["OCP_${params.ENVIRONMENT.toUpperCase()}_BASE_IMAGE"] ?: BASE_IMAGE
 
                     sh """
                         docker build \
-                        --build-arg BASE_IMAGE=${BASE_IMAGE} \
+                        --build-arg BASE_IMAGE=${baseImage} \
                         -t ${APP_NAME}:${tag} \
                         -f Dockerfile .
                     """
