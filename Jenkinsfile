@@ -71,15 +71,30 @@ pipeline {
             steps {
                 script {
 
-                    def tag       = params.VERSION ?: "latest"
-                    def baseImage = env["OCP_${params.ENVIRONMENT.toUpperCase()}_BASE_IMAGE"] ?: BASE_IMAGE
+                    def tag         = params.VERSION ?: "latest"
+                    def baseImage   = env["OCP_${params.ENVIRONMENT.toUpperCase()}_BASE_IMAGE"] ?: BASE_IMAGE
+                    def baseHost    = baseImage.tokenize('/')[0]
+                    def needsLogin  = baseHost.contains('.') || baseHost.contains(':')
+                    def tokenId     = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
 
-                    sh """
-                        docker build \
-                        --build-arg BASE_IMAGE=${baseImage} \
-                        -t ${APP_NAME}:${tag} \
-                        -f Dockerfile .
-                    """
+                    if (needsLogin) {
+                        withCredentials([string(credentialsId: tokenId, variable: 'TOKEN')]) {
+                            sh """
+                                echo "\${TOKEN}" | docker login ${baseHost} -u openshift --password-stdin
+                                docker build \
+                                --build-arg BASE_IMAGE=${baseImage} \
+                                -t ${APP_NAME}:${tag} \
+                                -f Dockerfile .
+                            """
+                        }
+                    } else {
+                        sh """
+                            docker build \
+                            --build-arg BASE_IMAGE=${baseImage} \
+                            -t ${APP_NAME}:${tag} \
+                            -f Dockerfile .
+                        """
+                    }
                 }
             }
         }
