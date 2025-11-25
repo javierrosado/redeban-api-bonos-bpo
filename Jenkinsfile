@@ -59,7 +59,6 @@ pipeline {
                            COMPILACION
            =========================================================== */
         stage('Compile') {
-            when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
                 sh 'mvn clean package -DskipTests'
             }
@@ -69,11 +68,10 @@ pipeline {
                         BUILD DOCKER (solo capas nuevas)
            =========================================================== */
         stage('Build Image') {
-            when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
                 script {
 
-                    def tag         = params.VERSION ?: "latest"
+                    def tag         = params.VERSION?.trim() ? params.VERSION.trim() : "latest"
                     def baseImage   = env["OCP_${params.ENVIRONMENT.toUpperCase()}_BASE_IMAGE"] ?: BASE_IMAGE
                     def baseHost    = baseImage.tokenize('/')[0]
                     def needsLogin  = baseHost.contains('.') || baseHost.contains(':')
@@ -107,12 +105,11 @@ pipeline {
                              PUSH DOCKER
            =========================================================== */
         stage('Push Image') {
-            when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
                 script {
                     def registry = env["OCP_${params.ENVIRONMENT.toUpperCase()}_REGISTRY"]
                     def tokenId  = "OCP_${params.ENVIRONMENT.toUpperCase()}_TOKEN"
-                    def tag      = params.VERSION ?: "latest"
+                    def tag      = params.VERSION?.trim() ? params.VERSION.trim() : "latest"
 
                     withCredentials([string(credentialsId: tokenId, variable: 'TOKEN')]) {
 
@@ -143,7 +140,10 @@ pipeline {
                     def routeSuffix    = env["OCP_${params.ENVIRONMENT.toUpperCase()}_ROUTE_SUFFIX"]
                     def routeHost      = env["OCP_${params.ENVIRONMENT.toUpperCase()}_ROUTE_HOST"] ?: (routeSuffix ? "${APP_NAME}.${routeSuffix}" : "${APP_NAME}.${params.ENVIRONMENT}.apps")
                     def appContext     = env["OCP_${params.ENVIRONMENT.toUpperCase()}_APP_CONTEXT"] ?: DEFAULT_APP_CONTEXT
-                    def manifestVersion = params.VERSION ?: "latest"
+                    def manifestVersion = params.VERSION?.trim() ? params.VERSION.trim() : "latest"
+                    if (params.ENVIRONMENT == 'prod' && !params.VERSION?.trim()) {
+                        error("Debe especificar VERSION para despliegues en PROD.")
+                    }
 
                     withCredentials([string(credentialsId: cred, variable: 'TOKEN')]) {
                         sh """
